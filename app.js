@@ -4,7 +4,7 @@ const bodyParser = require('body-parser');
 const path = require('path');
 
 const app = express();
-const db = new sqlite3.Database(path.join(__dirname, 'estoque.db')); // Corrigido aqui
+const db = new sqlite3.Database(path.join(__dirname, 'database.sqlite')); // Usando database.sqlite
 
 // Configurar o body-parser para lidar com dados JSON e urlencoded
 app.use(bodyParser.json());
@@ -20,11 +20,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Rota para a página inicial (exibe os agendamentos)
 app.get('/', (req, res) => {
     db.all(`
-        SELECT a.id, a.empresa, a.dataHora, a.tecnico, a.tipoServico, p.produto AS nome_produto, 
-               p.local AS local_produto, a.observacoes, ap.quantidade 
-        FROM agendamentos a
-        LEFT JOIN agendamentos_produtos ap ON a.id = ap.id_agendamento
-        LEFT JOIN produtos p ON ap.id_produto = p.id`, [], (err, rows) => {
+        SELECT a.id, a.clienteId, a.dataHora, a.tecnico, a.tipoServico, a.observacoes, a.frotaModelo, a.numeroChassi
+        FROM Agendamentos a`, [], (err, rows) => {
         if (err) {
             console.error(err);
             res.status(500).send('Erro ao buscar agendamentos');
@@ -36,14 +33,14 @@ app.get('/', (req, res) => {
 });
 
 app.post('/agendamentos', (req, res) => {
-    const { empresa, dataHora, tecnico, tipoServico, pecas, observacoes } = req.body;
+    const { clienteId, dataHora, tecnico, tipoServico, observacoes, frotaModelo, numeroChassi } = req.body;
 
-    // Verifica se já existe um agendamento com a mesma empresa, dataHora, e técnico
+    // Verifica se já existe um agendamento com o mesmo cliente, dataHora, e técnico
     const queryVerificacao = `
-        SELECT * FROM agendamentos
-        WHERE empresa = ? AND dataHora = ? AND tecnico = ?`;
+        SELECT * FROM Agendamentos
+        WHERE clienteId = ? AND dataHora = ? AND tecnico = ?`;
     
-    db.get(queryVerificacao, [empresa, dataHora, tecnico], (err, row) => {
+    db.get(queryVerificacao, [clienteId, dataHora, tecnico], (err, row) => {
         if (err) {
             return res.status(500).send('Erro ao verificar agendamento');
         }
@@ -55,29 +52,12 @@ app.post('/agendamentos', (req, res) => {
 
         // Insira o agendamento na tabela de agendamentos
         const queryAgendamento = `
-            INSERT INTO agendamentos (empresa, dataHora, tecnico, tipoServico, observacoes)
-            VALUES (?, ?, ?, ?, ?)`;
+            INSERT INTO Agendamentos (clienteId, dataHora, tecnico, tipoServico, observacoes, frotaModelo, numeroChassi)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`;
 
-        db.run(queryAgendamento, [empresa, dataHora, tecnico, tipoServico, observacoes], function(err) {
+        db.run(queryAgendamento, [clienteId, dataHora, tecnico, tipoServico, observacoes, frotaModelo, numeroChassi], function(err) {
             if (err) {
                 return res.status(500).send('Erro ao criar agendamento');
-            }
-
-            const agendamentoId = this.lastID; // Pega o ID do agendamento inserido
-
-            // Agora insira as peças associadas ao agendamento (caso haja)
-            const queryAgendamentoProduto = `
-                INSERT INTO agendamentos_produtos (id_agendamento, id_produto, quantidade)
-                VALUES (?, ?, ?)`;
-
-            if (Array.isArray(pecas) && pecas.length > 0) {
-                pecas.forEach(peca => {
-                    db.run(queryAgendamentoProduto, [agendamentoId, peca.id_produto, peca.quantidade], (err) => {
-                        if (err) {
-                            return res.status(500).send('Erro ao associar produto ao agendamento');
-                        }
-                    });
-                });
             }
 
             res.status(200).send('Agendamento criado com sucesso');
@@ -85,56 +65,31 @@ app.post('/agendamentos', (req, res) => {
     });
 });
 
-
 // Rota para editar um agendamento existente
 app.put('/agendamentos/:id', (req, res) => {
     const { id } = req.params;
-    const { empresa, dataHora, tecnico, tipoServico, pecas, observacoes } = req.body;
+    const { clienteId, dataHora, tecnico, tipoServico, observacoes, frotaModelo, numeroChassi } = req.body;
 
     // Atualiza o agendamento na tabela agendamentos
-    db.run('UPDATE agendamentos SET empresa = ?, dataHora = ?, tecnico = ?, tipoServico = ?, observacoes = ? WHERE id = ?', 
-        [empresa, dataHora, tecnico, tipoServico, observacoes, id], 
+    db.run('UPDATE Agendamentos SET clienteId = ?, dataHora = ?, tecnico = ?, tipoServico = ?, observacoes = ?, frotaModelo = ?, numeroChassi = ? WHERE id = ?', 
+        [clienteId, dataHora, tecnico, tipoServico, observacoes, frotaModelo, numeroChassi, id], 
         function(err) {
             if (err) {
                 console.error(err);
                 res.status(500).send('Erro ao editar agendamento');
             } else {
-                // Primeiro, exclui os produtos antigos para o agendamento
-                db.run('DELETE FROM agendamentos_produtos WHERE id_agendamento = ?', [id], (err) => {
-                    if (err) {
-                        return res.status(500).send('Erro ao remover produtos antigos');
-                    }
-
-                    // Agora insere os novos produtos
-                    const queryAgendamentoProduto = `
-                        INSERT INTO agendamentos_produtos (id_agendamento, id_produto, quantidade)
-                        VALUES (?, ?, ?)`;
-
-                    if (Array.isArray(pecas) && pecas.length > 0) {
-                        pecas.forEach(peca => {
-                            db.run(queryAgendamentoProduto, [id, peca.id_produto, peca.quantidade], (err) => {
-                                if (err) {
-                                    return res.status(500).send('Erro ao associar novo produto ao agendamento');
-                                }
-                            });
-                        });
-                    }
-
-                    res.send('Agendamento atualizado com sucesso');
-                });
+                res.send('Agendamento atualizado com sucesso');
             }
         });
 });
+
 // Rota para obter os detalhes de um agendamento
 app.get('/agendamentos/:id', (req, res) => {
     const { id } = req.params;
     
     db.get(`
-        SELECT a.id, a.empresa, a.dataHora, a.tecnico, a.tipoServico, a.observacoes, 
-               p.produto AS nome_produto, ap.quantidade 
-        FROM agendamentos a
-        LEFT JOIN agendamentos_produtos ap ON a.id = ap.id_agendamento
-        LEFT JOIN produtos p ON ap.id_produto = p.id
+        SELECT a.id, a.clienteId, a.dataHora, a.tecnico, a.tipoServico, a.observacoes, a.frotaModelo, a.numeroChassi
+        FROM Agendamentos a
         WHERE a.id = ?`, [id], (err, row) => {
         if (err) {
             console.error(err);
@@ -145,29 +100,45 @@ app.get('/agendamentos/:id', (req, res) => {
         }
     });
 });
+
+// Rota para excluir um agendamento
 app.delete('/agendamentos/:id', (req, res) => {
     const { id } = req.params;
 
-    // Primeiro, exclua os produtos associados ao agendamento
-    db.run('DELETE FROM agendamentos_produtos WHERE id_agendamento = ?', [id], (err) => {
+    // Exclua o agendamento
+    db.run('DELETE FROM Agendamentos WHERE id = ?', [id], (err) => {
         if (err) {
-            return res.status(500).send('Erro ao excluir produtos associados');
+            return res.status(500).send('Erro ao excluir agendamento');
         }
 
-        // Agora, exclua o agendamento
-        db.run('DELETE FROM agendamentos WHERE id = ?', [id], (err) => {
-            if (err) {
-                return res.status(500).send('Erro ao excluir agendamento');
-            }
-
-            res.send('Agendamento excluído com sucesso');
-        });
+        res.send('Agendamento excluído com sucesso');
     });
 });
 
+// Rotas para obter dados de PosVendas e ClientesFRTs
+app.get('/api/posvendas', (req, res) => {
+    db.all('SELECT * FROM PosVendas', [], (err, rows) => {
+        if (err) {
+            console.error(err);
+            res.status(500).send('Erro ao buscar dados de Pós Vendas');
+        } else {
+            res.json(rows);
+        }
+    });
+});
 
+app.get('/api/clientesfrts', (req, res) => {
+    db.all('SELECT * FROM ClientesFRTs', [], (err, rows) => {
+        if (err) {
+            console.error(err);
+            res.status(500).send('Erro ao buscar dados de Clientes FRTs');
+        } else {
+            res.json(rows);
+        }
+    });
+});
 
-// Iniciar o servidor
+// Iniciar o servidor na porta 3001
 const PORT = 3001;
 app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
